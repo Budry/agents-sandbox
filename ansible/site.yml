@@ -1,0 +1,145 @@
+---
+-   name: Provision Debian 13 server
+    hosts: servers
+    become: true
+
+    tasks:
+        -   name: Update apt cache
+            ansible.builtin.apt:
+                update_cache: true
+                cache_valid_time: 3600
+
+        -   name: Install base packages
+            ansible.builtin.apt:
+                name:
+                    - ca-certificates
+                    - curl
+                    - gnupg
+                    - lsb-release
+                    - openssh-server
+                    - vim
+                    - git
+                    - sudo
+                    - acl
+                state: present
+
+        -   name: Ensure ssh service is enabled
+            ansible.builtin.service:
+                name: ssh
+                state: started
+                enabled: true
+
+        -   name: Ensure apt keyrings directory exists
+            ansible.builtin.file:
+                path: /etc/apt/keyrings
+                state: directory
+                mode: "0755"
+
+        -   name: Add Docker GPG key
+            ansible.builtin.get_url:
+                url: https://download.docker.com/linux/debian/gpg
+                dest: /etc/apt/keyrings/docker.gpg
+                mode: "0644"
+
+        -   name: Add Docker apt repository
+            ansible.builtin.apt_repository:
+                repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable"
+                state: present
+
+        -   name: Install Docker Engine and Compose plugin
+            ansible.builtin.apt:
+                name:
+                    - docker-ce
+                    - docker-ce-cli
+                    - containerd.io
+                    - docker-buildx-plugin
+                    - docker-compose-plugin
+                state: present
+                update_cache: true
+
+        -   name: Enable Docker service
+            ansible.builtin.service:
+                name: docker
+                state: started
+                enabled: true
+
+        -   name: Add SSH public keys for the remote user
+            ansible.builtin.authorized_key:
+                user: "{{ ansible_user }}"
+                key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_ed25519.pub') }}"
+                state: present
+
+        -   name: Add remote user to docker group
+            ansible.builtin.user:
+                name: "{{ ansible_user }}"
+                groups: docker
+                append: true
+            when: ansible_user is defined
+
+        -   name: Generate SSH key for the user
+            ansible.builtin.user:
+                name: "{{ ansible_user }}"
+                generate_ssh_key: true
+                ssh_key_type: ed25519
+            when: ansible_user is defined
+
+        -   name: Ensure SSH_AUTH_SOCK is available for interactive shells
+            ansible.builtin.blockinfile:
+                path: "/home/{{ ansible_user }}/.bashrc"
+                create: true
+                owner: "{{ ansible_user }}"
+                group: "{{ ansible_user }}"
+                mode: "0644"
+                marker: "# {mark} ANSIBLE SSH AGENT"
+                block: |
+                    if [ -z "${SSH_AUTH_SOCK:-}" ]; then
+                        export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-agent.socket"
+                        if [ ! -S "${SSH_AUTH_SOCK}" ]; then
+                            ssh-agent -a "${SSH_AUTH_SOCK}" >/dev/null
+                            ssh-add "${HOME}/.ssh/id_ed25519" >/dev/null 2>&1 || true
+                        fi
+                    fi
+            when: ansible_user is defined
+
+        -   name: Check if already logged into Docker registry
+            ansible.builtin.shell: cat ~/.docker/config.json 2>/dev/null | grep -q "docker-registry.zaruba-ondrej.dev"
+            become_user: "{{ ansible_user }}"
+            register: docker_login_check
+            ignore_errors: true
+            changed_when: false
+            when: ansible_user is defined
+
+        -   name: Prompt for Docker Registry Username
+            ansible.builtin.pause:
+                prompt: "Docker Registry Username"
+            register: registry_username_input
+            when: ansible_user is defined and docker_login_check.rc != 0
+
+        -   name: Prompt for Docker Registry Password
+            ansible.builtin.pause:
+                prompt: "Docker Registry Password"
+                echo: no
+            register: registry_password_input
+            when: ansible_user is defined and docker_login_check.rc != 0
+
+        -   name: Log into private registry
+            ansible.builtin.shell: echo "{{ registry_password_input.user_input }}" | docker login docker-registry.zaruba-ondrej.dev -u "{{ registry_username_input.user_input }}" --password-stdin
+            become_user: "{{ ansible_user }}"
+            no_log: true
+            when: ansible_user is defined and docker_login_check.rc != 0
+
+        -   name: Copy .codex directory to user home
+            ansible.builtin.copy:
+                src: ../.codex
+                dest: "/home/{{ ansible_user }}/"
+                owner: "{{ ansible_user }}"
+                group: "{{ ansible_user }}"
+                mode: "0644"
+                directory_mode: "0755"
+            when: ansible_user is defined
+
+        -   name: Install agent-sandbox script
+            ansible.builtin.copy:
+                src: ../agent-sandbox.sh
+                dest: /usr/local/bin/agent-sandbox
+                mode: "0755"

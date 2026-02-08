@@ -1,0 +1,7 @@
+all:
+    children:
+        servers:
+            hosts:
+                debian13:
+                    ansible_host: 52.15.74.52
+                    ansible_user: admin
