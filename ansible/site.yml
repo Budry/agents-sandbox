@@ -2,6 +2,16 @@
 -   name: Provision Debian 13 server
     hosts: servers
     become: true
+    vars:
+        sandbox_image: docker-registry.zaruba-ondrej.dev/codex-sandbox
+        sandbox_registry_host: "{{ sandbox_image.split('/')[0] }}"
+    vars_prompt:
+        -   name: registry_user
+            prompt: "Docker registry username"
+            private: false
+        -   name: registry_pass
+            prompt: "Docker registry password"
+            private: true
 
     tasks:
         -   name: Update apt cache
@@ -16,6 +26,7 @@
                     - curl
                     - gnupg
                     - lsb-release
+                    - openssh-client
                     - openssh-server
                     - vim
                     - git
@@ -63,11 +74,45 @@
                 state: started
                 enabled: true
 
+        -   name: Pull latest sandbox image with ephemeral registry auth
+            ansible.builtin.shell: |
+                set -euo pipefail
+                tmp_config="$(mktemp -d)"
+                cleanup() {
+                    rm -rf "${tmp_config}"
+                }
+                trap cleanup EXIT
+                export DOCKER_CONFIG="${tmp_config}"
+                printf '%s\n' "$REGISTRY_PASS" | docker login "{{ sandbox_registry_host }}" -u "$REGISTRY_USER" --password-stdin >/dev/null
+                docker pull "{{ sandbox_image }}"
+            args:
+                executable: /bin/bash
+            environment:
+                REGISTRY_USER: "{{ registry_user }}"
+                REGISTRY_PASS: "{{ registry_pass }}"
+            no_log: true
+
         -   name: Add SSH public keys for the remote user
             ansible.builtin.authorized_key:
                 user: "{{ ansible_user }}"
                 key: "{{ lookup('file', lookup('env','HOME') + '/.ssh/id_ed25519.pub') }}"
                 state: present
+
+        -   name: Ensure .ssh directory exists for remote user
+            ansible.builtin.file:
+                path: "/home/{{ ansible_user }}/.ssh"
+                state: directory
+                owner: "{{ ansible_user }}"
+                group: "{{ ansible_user }}"
+                mode: "0700"
+            when: ansible_user is defined
+
+        -   name: Generate dedicated sandbox SSH key for remote user
+            ansible.builtin.command:
+                cmd: ssh-keygen -t ed25519 -a 64 -N '' -f /home/{{ ansible_user }}/.ssh/codex_sandbox_ed25519
+                creates: /home/{{ ansible_user }}/.ssh/codex_sandbox_ed25519
+            become_user: "{{ ansible_user }}"
+            when: ansible_user is defined
 
         -   name: Add remote user to docker group
             ansible.builtin.user:
@@ -75,58 +120,6 @@
                 groups: docker
                 append: true
             when: ansible_user is defined
-
-        -   name: Generate SSH key for the user
-            ansible.builtin.user:
-                name: "{{ ansible_user }}"
-                generate_ssh_key: true
-                ssh_key_type: ed25519
-            when: ansible_user is defined
-
-        -   name: Ensure SSH_AUTH_SOCK is available for interactive shells
-            ansible.builtin.blockinfile:
-                path: "/home/{{ ansible_user }}/.bashrc"
-                create: true
-                owner: "{{ ansible_user }}"
-                group: "{{ ansible_user }}"
-                mode: "0644"
-                marker: "# {mark} ANSIBLE SSH AGENT"
-                block: |
-                    if [ -z "${SSH_AUTH_SOCK:-}" ]; then
-                        export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-agent.socket"
-                        if [ ! -S "${SSH_AUTH_SOCK}" ]; then
-                            ssh-agent -a "${SSH_AUTH_SOCK}" >/dev/null
-                            ssh-add "${HOME}/.ssh/id_ed25519" >/dev/null 2>&1 || true
-                        fi
-                    fi
-            when: ansible_user is defined
-
-        -   name: Check if already logged into Docker registry
-            ansible.builtin.shell: cat ~/.docker/config.json 2>/dev/null | grep -q "docker-registry.zaruba-ondrej.dev"
-            become_user: "{{ ansible_user }}"
-            register: docker_login_check
-            ignore_errors: true
-            changed_when: false
-            when: ansible_user is defined
-
-        -   name: Prompt for Docker Registry Username
-            ansible.builtin.pause:
-                prompt: "Docker Registry Username"
-            register: registry_username_input
-            when: ansible_user is defined and docker_login_check.rc != 0
-
-        -   name: Prompt for Docker Registry Password
-            ansible.builtin.pause:
-                prompt: "Docker Registry Password"
-                echo: no
-            register: registry_password_input
-            when: ansible_user is defined and docker_login_check.rc != 0
-
-        -   name: Log into private registry
-            ansible.builtin.shell: echo "{{ registry_password_input.user_input }}" | docker login docker-registry.zaruba-ondrej.dev -u "{{ registry_username_input.user_input }}" --password-stdin
-            become_user: "{{ ansible_user }}"
-            no_log: true
-            when: ansible_user is defined and docker_login_check.rc != 0
 
         -   name: Copy .codex directory to user home
             ansible.builtin.copy:
@@ -137,6 +130,18 @@
                 mode: "0644"
                 directory_mode: "0755"
             when: ansible_user is defined
+
+        -   name: Install docker-pull-session command
+            ansible.builtin.copy:
+                src: ../scripts/docker-pull-session.sh
+                dest: /usr/local/bin/docker-pull-session
+                mode: "0755"
+
+        -   name: Install docker-push-session command
+            ansible.builtin.copy:
+                src: ../scripts/docker-push-session.sh
+                dest: /usr/local/bin/docker-push-session
+                mode: "0755"
 
         -   name: Install agent-sandbox script
             ansible.builtin.copy:

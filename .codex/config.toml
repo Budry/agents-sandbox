@@ -1,1 +1,2 @@
+model = "gpt-5.3-codex"
 sandbox_mode = "danger-full-access"
