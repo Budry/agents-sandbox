@@ -7,19 +7,19 @@ NETWORK_NAME="sandnet"
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/run-here.sh [--help]
-       ./scripts/run-here.sh start <config.toml>
-       ./scripts/run-here.sh stop
-       ./scripts/run-here.sh exec <cmd>...
+Usage: ./agent-sandbox.sh [--help]
+       ./agent-sandbox.sh start <config.toml>
+       ./agent-sandbox.sh stop
+       ./agent-sandbox.sh exec <cmd>...
 
 Starts or stops a DinD sandbox for the current directory. The exec form
 executes <cmd> inside the sandbox (sandbox must already be running).
 
 Examples:
-  ./scripts/run-here.sh start ~/.codex/config.toml
-  ./scripts/run-here.sh exec codex --model gpt-4.1
-  ./scripts/run-here.sh exec bash
-  ./scripts/run-here.sh stop
+  ./agent-sandbox.sh start ~/.codex/config.toml
+  ./agent-sandbox.sh exec codex --model gpt-4.1
+  ./agent-sandbox.sh exec bash
+  ./agent-sandbox.sh stop
 EOF
 }
 
