@@ -60,12 +60,11 @@ start_sandbox() {
 
   if [ ! -f "${ssh_key_path}" ]; then
     echo "SSH key not found: ${ssh_key_path}" >&2
-    echo "Set SANDBOX_SSH_KEY to a private key path accessible on the host." >&2
     exit 1
   fi
 
-  ssh_mounts+=(-v "${ssh_key_path}:/ssh-key:ro")
-  ssh_env+=(-e "SSH_AUTH_SOCK=/ssh-agent/agent.sock")
+  ssh_mounts+=(-v "${ssh_key_path}:/run/secrets/ro_key:ro")
+  ssh_env+=(-e "GIT_SSH_COMMAND=ssh -i /run/secrets/ro_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new")
   docker run -d --rm --name "${SANDBOX_NAME}" \
     --privileged \
     --network "${NETWORK_NAME}" \
@@ -79,9 +78,6 @@ start_sandbox() {
     "${IMAGE_NAME}" sh -c "if [ -f /defaults/config.toml ]; then \
       mkdir -p /root/.codex && cp /defaults/config.toml /root/.codex/config.toml; \
     fi; \
-    mkdir -p /ssh-agent; \
-    ssh-agent -a /ssh-agent/agent.sock >/dev/null; \
-    ssh-add /ssh-key >/dev/null 2>&1 || true; \
     dockerd & \
     while ! docker info >/dev/null 2>&1; do sleep 1; done; \
     tail -f /dev/null" >/dev/null
