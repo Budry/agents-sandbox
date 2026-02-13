@@ -8,7 +8,7 @@ NETWORK_NAME="sandnet"
 usage() {
   cat <<'EOF'
 Usage: ./agent-sandbox.sh [--help]
-       ./agent-sandbox.sh start <config.toml>
+       ./agent-sandbox.sh start <config.toml> <ssh_key>
        ./agent-sandbox.sh stop
        ./agent-sandbox.sh exec <cmd>...
 
@@ -16,7 +16,7 @@ Starts or stops a DinD sandbox for the current directory. The exec form
 executes <cmd> inside the sandbox (sandbox must already be running).
 
 Examples:
-  ./agent-sandbox.sh start ~/.codex/config.toml
+  ./agent-sandbox.sh start ~/.codex/config.toml ~/.ssh/id_ed25519
   ./agent-sandbox.sh exec codex --model gpt-4.1
   ./agent-sandbox.sh exec bash
   ./agent-sandbox.sh stop
@@ -54,13 +54,18 @@ fi
 
 start_sandbox() {
   local config_path="$1"
+  local ssh_key_path="$2"
   local ssh_mounts=()
   local ssh_env=()
 
-  if [ -n "${SSH_AUTH_SOCK:-}" ] && [ -S "${SSH_AUTH_SOCK}" ]; then
-    ssh_mounts+=(-v "${SSH_AUTH_SOCK}:/ssh-agent")
-    ssh_env+=(-e "SSH_AUTH_SOCK=/ssh-agent")
+  if [ ! -f "${ssh_key_path}" ]; then
+    echo "SSH key not found: ${ssh_key_path}" >&2
+    echo "Set SANDBOX_SSH_KEY to a private key path accessible on the host." >&2
+    exit 1
   fi
+
+  ssh_mounts+=(-v "${ssh_key_path}:/ssh-key:ro")
+  ssh_env+=(-e "SSH_AUTH_SOCK=/ssh-agent/agent.sock")
   docker run -d --rm --name "${SANDBOX_NAME}" \
     --privileged \
     --network "${NETWORK_NAME}" \
@@ -74,6 +79,9 @@ start_sandbox() {
     "${IMAGE_NAME}" sh -c "if [ -f /defaults/config.toml ]; then \
       mkdir -p /root/.codex && cp /defaults/config.toml /root/.codex/config.toml; \
     fi; \
+    mkdir -p /ssh-agent; \
+    ssh-agent -a /ssh-agent/agent.sock >/dev/null; \
+    ssh-add /ssh-key >/dev/null 2>&1 || true; \
     dockerd & \
     while ! docker info >/dev/null 2>&1; do sleep 1; done; \
     tail -f /dev/null" >/dev/null
@@ -89,8 +97,8 @@ case "${COMMAND}" in
     exit 1
     ;;
   start)
-    if [ "${#CMD_ARGS[@]}" -ne 1 ]; then
-      echo "Missing required config.toml path for start."
+    if [ "${#CMD_ARGS[@]}" -ne 2 ]; then
+      echo "Missing required config.toml path or ssh key for start."
       usage
       exit 1
     fi
@@ -98,11 +106,15 @@ case "${COMMAND}" in
       echo "Config file not found: ${CMD_ARGS[0]}"
       exit 1
     fi
+    if [ ! -f "${CMD_ARGS[1]}" ]; then
+      echo "SSH key not found: ${CMD_ARGS[1]}"
+      exit 1
+    fi
     if is_running; then
       echo "Sandbox already running: ${SANDBOX_NAME}"
       exit 1
     fi
-    start_sandbox "${CMD_ARGS[0]}"
+    start_sandbox "${CMD_ARGS[0]}" "${CMD_ARGS[1]}"
     echo "Sandbox started: ${SANDBOX_NAME}"
     echo "Project mounted from: ${PROJECT_DIR}"
     ;;

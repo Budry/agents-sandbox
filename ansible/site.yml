@@ -16,6 +16,7 @@
                     - curl
                     - gnupg
                     - lsb-release
+                    - openssh-client
                     - openssh-server
                     - vim
                     - git
@@ -74,31 +75,6 @@
                 name: "{{ ansible_user }}"
                 groups: docker
                 append: true
-            when: ansible_user is defined
-
-        -   name: Generate SSH key for the user
-            ansible.builtin.user:
-                name: "{{ ansible_user }}"
-                generate_ssh_key: true
-                ssh_key_type: ed25519
-            when: ansible_user is defined
-
-        -   name: Ensure SSH_AUTH_SOCK is available for interactive shells
-            ansible.builtin.blockinfile:
-                path: "/home/{{ ansible_user }}/.bashrc"
-                create: true
-                owner: "{{ ansible_user }}"
-                group: "{{ ansible_user }}"
-                mode: "0644"
-                marker: "# {mark} ANSIBLE SSH AGENT"
-                block: |
-                    if [ -z "${SSH_AUTH_SOCK:-}" ]; then
-                        export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/ssh-agent.socket"
-                        if [ ! -S "${SSH_AUTH_SOCK}" ]; then
-                            ssh-agent -a "${SSH_AUTH_SOCK}" >/dev/null
-                            ssh-add "${HOME}/.ssh/id_ed25519" >/dev/null 2>&1 || true
-                        fi
-                    fi
             when: ansible_user is defined
 
         -   name: Check if already logged into Docker registry
