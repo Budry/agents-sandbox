@@ -41,6 +41,7 @@ VOL_DOCKER="${SANDBOX_NAME}-docker"
 VOL_CODEX="codex-shared"
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
+CODEX_HOME_IN_CONTAINER="/codex-home"
 
 # Build image if missing.
 if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
@@ -69,18 +70,16 @@ start_sandbox() {
     --privileged \
     --network "${NETWORK_NAME}" \
     -v "${VOL_DOCKER}:/var/lib/docker" \
-    -v "${VOL_CODEX}:/root/.codex" \
+    -v "${VOL_CODEX}:${CODEX_HOME_IN_CONTAINER}" \
     -v "${PROJECT_DIR}:/work" \
     -w /work \
+    -e "HOST_UID=${HOST_UID}" \
+    -e "HOST_GID=${HOST_GID}" \
+    -e "CODEX_HOME=${CODEX_HOME_IN_CONTAINER}" \
     "${ssh_env[@]}" \
     "${ssh_mounts[@]}" \
     -v "${config_path}:/defaults/config.toml:ro" \
-    "${IMAGE_NAME}" sh -c "if [ -f /defaults/config.toml ]; then \
-      mkdir -p /root/.codex && cp /defaults/config.toml /root/.codex/config.toml; \
-    fi; \
-    dockerd & \
-    while ! docker info >/dev/null 2>&1; do sleep 1; done; \
-    tail -f /dev/null" >/dev/null
+    "${IMAGE_NAME}" >/dev/null
 }
 
 is_running() {
@@ -132,7 +131,13 @@ case "${COMMAND}" in
       echo "Sandbox not running: ${SANDBOX_NAME}"
       exit 1
     fi
-    exec docker exec -it -u "${HOST_UID}:${HOST_GID}" -w /work "${SANDBOX_NAME}" "${CMD_ARGS[@]}"
+    exec docker exec -it \
+      -u "${HOST_UID}:${HOST_GID}" \
+      -e "HOME=/tmp" \
+      -e "CODEX_HOME=${CODEX_HOME_IN_CONTAINER}" \
+      -w /work \
+      "${SANDBOX_NAME}" \
+      "${CMD_ARGS[@]}"
     ;;
   *)
     echo "Unknown command: ${COMMAND}"

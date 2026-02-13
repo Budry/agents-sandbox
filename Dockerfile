@@ -1,7 +1,7 @@
 FROM debian:13
 
 ENV DEBIAN_FRONTEND=noninteractive\
-    CODEX_HOME=/root/.codex
+    CODEX_HOME=/codex-home
 WORKDIR /work
 
 RUN apt-get update \
@@ -31,8 +31,10 @@ RUN apt-get update \
   && npm i -g @openai/codex \
   && rm -rf /var/lib/apt/lists/*
 
+RUN mkdir -p /codex-home
+COPY scripts/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
+
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD docker info >/dev/null 2>&1 || exit 1
 
-CMD ["sh", "-c", "dockerd & \
-  while ! docker info >/dev/null 2>&1; do sleep 1; done; \
-  tail -f /dev/null"]
+CMD ["/usr/local/bin/sandbox-entrypoint.sh"]

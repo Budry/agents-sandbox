@@ -2,6 +2,16 @@
 -   name: Provision Debian 13 server
     hosts: servers
     become: true
+    vars:
+        sandbox_image: docker-registry.zaruba-ondrej.dev/codex-sandbox
+        sandbox_registry_host: "{{ sandbox_image.split('/')[0] }}"
+    vars_prompt:
+        -   name: registry_user
+            prompt: "Docker registry username"
+            private: false
+        -   name: registry_pass
+            prompt: "Docker registry password"
+            private: true
 
     tasks:
         -   name: Update apt cache
@@ -64,6 +74,24 @@
                 state: started
                 enabled: true
 
+        -   name: Pull latest sandbox image with ephemeral registry auth
+            ansible.builtin.shell: |
+                set -euo pipefail
+                tmp_config="$(mktemp -d)"
+                cleanup() {
+                    rm -rf "${tmp_config}"
+                }
+                trap cleanup EXIT
+                export DOCKER_CONFIG="${tmp_config}"
+                printf '%s\n' "$REGISTRY_PASS" | docker login "{{ sandbox_registry_host }}" -u "$REGISTRY_USER" --password-stdin >/dev/null
+                docker pull "{{ sandbox_image }}"
+            args:
+                executable: /bin/bash
+            environment:
+                REGISTRY_USER: "{{ registry_user }}"
+                REGISTRY_PASS: "{{ registry_pass }}"
+            no_log: true
+
         -   name: Add SSH public keys for the remote user
             ansible.builtin.authorized_key:
                 user: "{{ ansible_user }}"
@@ -103,29 +131,17 @@
                 directory_mode: "0755"
             when: ansible_user is defined
 
-        -   name: Install docker session scripts
+        -   name: Install docker-pull-session command
             ansible.builtin.copy:
-                src: "../scripts/{{ item }}"
-                dest: "/usr/local/bin/{{ item }}"
+                src: ../scripts/docker-pull-session.sh
+                dest: /usr/local/bin/docker-pull-session
                 mode: "0755"
-            loop:
-                - docker-push-session.sh
-                - docker-pull-session.sh
-                - docker-session-alias.sh
 
-        -   name: Enable docker session alias in user shell
-            ansible.builtin.blockinfile:
-                path: "/home/{{ ansible_user }}/.bashrc"
-                create: true
-                owner: "{{ ansible_user }}"
-                group: "{{ ansible_user }}"
-                mode: "0644"
-                marker: "# {mark} ANSIBLE DOCKER SESSION"
-                block: |
-                    if [ -f /usr/local/bin/docker-session-alias.sh ]; then
-                        . /usr/local/bin/docker-session-alias.sh
-                    fi
-            when: ansible_user is defined
+        -   name: Install docker-push-session command
+            ansible.builtin.copy:
+                src: ../scripts/docker-push-session.sh
+                dest: /usr/local/bin/docker-push-session
+                mode: "0755"
 
         -   name: Install agent-sandbox script
             ansible.builtin.copy:
