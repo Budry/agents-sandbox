@@ -77,33 +77,6 @@
                 append: true
             when: ansible_user is defined
 
-        -   name: Check if already logged into Docker registry
-            ansible.builtin.shell: cat ~/.docker/config.json 2>/dev/null | grep -q "docker-registry.zaruba-ondrej.dev"
-            become_user: "{{ ansible_user }}"
-            register: docker_login_check
-            ignore_errors: true
-            changed_when: false
-            when: ansible_user is defined
-
-        -   name: Prompt for Docker Registry Username
-            ansible.builtin.pause:
-                prompt: "Docker Registry Username"
-            register: registry_username_input
-            when: ansible_user is defined and docker_login_check.rc != 0
-
-        -   name: Prompt for Docker Registry Password
-            ansible.builtin.pause:
-                prompt: "Docker Registry Password"
-                echo: no
-            register: registry_password_input
-            when: ansible_user is defined and docker_login_check.rc != 0
-
-        -   name: Log into private registry
-            ansible.builtin.shell: echo "{{ registry_password_input.user_input }}" | docker login docker-registry.zaruba-ondrej.dev -u "{{ registry_username_input.user_input }}" --password-stdin
-            become_user: "{{ ansible_user }}"
-            no_log: true
-            when: ansible_user is defined and docker_login_check.rc != 0
-
         -   name: Copy .codex directory to user home
             ansible.builtin.copy:
                 src: ../.codex
@@ -112,6 +85,30 @@
                 group: "{{ ansible_user }}"
                 mode: "0644"
                 directory_mode: "0755"
+            when: ansible_user is defined
+
+        -   name: Install docker session scripts
+            ansible.builtin.copy:
+                src: "../scripts/{{ item }}"
+                dest: "/usr/local/bin/{{ item }}"
+                mode: "0755"
+            loop:
+                - docker-push-session.sh
+                - docker-pull-session.sh
+                - docker-session-alias.sh
+
+        -   name: Enable docker session alias in user shell
+            ansible.builtin.blockinfile:
+                path: "/home/{{ ansible_user }}/.bashrc"
+                create: true
+                owner: "{{ ansible_user }}"
+                group: "{{ ansible_user }}"
+                mode: "0644"
+                marker: "# {mark} ANSIBLE DOCKER SESSION"
+                block: |
+                    if [ -f /usr/local/bin/docker-session-alias.sh ]; then
+                        . /usr/local/bin/docker-session-alias.sh
+                    fi
             when: ansible_user is defined
 
         -   name: Install agent-sandbox script
