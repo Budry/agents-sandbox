@@ -11,6 +11,7 @@ Usage: ./agent-sandbox.sh [--help]
        ./agent-sandbox.sh start <config.toml> <ssh_key>
        ./agent-sandbox.sh stop
        ./agent-sandbox.sh exec <cmd>...
+       ./agent-sandbox.sh urls
 
 Starts or stops a DinD sandbox for the current directory. The exec form
 executes <cmd> inside the sandbox (sandbox must already be running).
@@ -19,6 +20,7 @@ Examples:
   ./agent-sandbox.sh start ~/.codex/config.toml ~/.ssh/id_ed25519
   ./agent-sandbox.sh exec codex --model gpt-4.1
   ./agent-sandbox.sh exec bash
+  ./agent-sandbox.sh urls
   ./agent-sandbox.sh stop
 EOF
 }
@@ -56,6 +58,7 @@ fi
 start_sandbox() {
   local config_path="$1"
   local ssh_key_path="$2"
+  local ingress_base_domain="${INGRESS_BASE_DOMAIN:-agents-sandbox.zaruba-ondrej.dev}"
   local ssh_mounts=()
   local ssh_env=()
 
@@ -69,6 +72,8 @@ start_sandbox() {
   docker run -d --rm --name "${SANDBOX_NAME}" \
     --privileged \
     --network "${NETWORK_NAME}" \
+    -p 80:80 \
+    -p 443:443 \
     -v "${VOL_DOCKER}:/var/lib/docker" \
     -v "${VOL_CODEX}:${CODEX_HOME_IN_CONTAINER}" \
     -v "${PROJECT_DIR}:/work" \
@@ -76,6 +81,7 @@ start_sandbox() {
     -e "HOST_UID=${HOST_UID}" \
     -e "HOST_GID=${HOST_GID}" \
     -e "CODEX_HOME=${CODEX_HOME_IN_CONTAINER}" \
+    -e "INGRESS_BASE_DOMAIN=${ingress_base_domain}" \
     "${ssh_env[@]}" \
     "${ssh_mounts[@]}" \
     -v "${config_path}:/defaults/config.toml:ro" \
@@ -138,6 +144,20 @@ case "${COMMAND}" in
       -w /work \
       "${SANDBOX_NAME}" \
       "${CMD_ARGS[@]}"
+    ;;
+  urls)
+    if ! is_running; then
+      echo "Sandbox not running: ${SANDBOX_NAME}"
+      exit 1
+    fi
+    docker exec "${SANDBOX_NAME}" sh -lc '
+      map_file="${CODEX_HOME:-/codex-home}/ingress/public-urls.json"
+      if [ ! -f "${map_file}" ] || [ "$(jq "length" "${map_file}")" -eq 0 ]; then
+        echo "No public URLs available yet."
+        exit 0
+      fi
+      jq -r '"'"'to_entries[] | "\(.value.url) -> \(.value.name) (\(.value.target))"'"'"' "${map_file}" | sort
+    '
     ;;
   *)
     echo "Unknown command: ${COMMAND}"

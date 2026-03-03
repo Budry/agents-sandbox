@@ -12,6 +12,7 @@ RUN apt-get update \
     gnupg \
     iproute2 \
     iptables \
+    jq \
     lsb-release \
     nodejs \
     npm \
@@ -33,7 +34,8 @@ RUN apt-get update \
 
 RUN mkdir -p /codex-home
 COPY scripts/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
-RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
+COPY scripts/ingress-watcher.sh /usr/local/bin/ingress-watcher.sh
+RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh /usr/local/bin/ingress-watcher.sh
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD docker info >/dev/null 2>&1 || exit 1
 
