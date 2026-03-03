@@ -3,7 +3,7 @@
 Dockerized sandbox for running OpenAI Codex with a DinD (Docker-in-Docker) setup and optional Ansible provisioning.
 
 ## What This Repo Contains
-- `Dockerfile` builds a Debian 13 image with Docker Engine, Compose plugin, and `@openai/codex`.
+- `Dockerfile` builds a Debian 13 image with Docker Engine, Compose plugin, `@openai/codex`, and `@anthropic-ai/claude-code`.
 - `agent-sandbox.sh` starts/stops a sandbox container and lets you execute commands inside it.
 - `scripts/` contains helpers for single-session docker registry auth when pulling/pushing images.
 - `ansible/` provisions a Debian 13 server and installs required dependencies.

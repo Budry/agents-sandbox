@@ -123,7 +123,7 @@
 
         -   name: Copy .codex directory to user home
             ansible.builtin.copy:
-                src: ../.codex
+                src: .codex
                 dest: "/home/{{ ansible_user }}/"
                 owner: "{{ ansible_user }}"
                 group: "{{ ansible_user }}"

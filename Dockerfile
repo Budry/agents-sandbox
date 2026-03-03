@@ -28,7 +28,7 @@ RUN apt-get update \
     containerd.io \
     docker-buildx-plugin \
     docker-compose-plugin \
-  && npm i -g @openai/codex \
+  && npm i -g @openai/codex @anthropic-ai/claude-code \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /codex-home
